@@ -1,6 +1,9 @@
 import { costOptimalTier, expectedPD, portfolioAtCutoff, predict } from "./model.js";
 
 const REPO = "https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment";
+// The Pages workflow loads this module as app.js?v=<commit>; reuse that query on data fetches so the
+// JSON always matches the deployed code. Empty when served locally, which is fine.
+const VERSION = new URL(import.meta.url).search;
 const TIERS = ["Low", "Medium", "High"];
 const NAMES = { logreg: "Logistic regression", xgboost: "XGBoost", resnet: "Tabular ResNet" };
 const SLOT = { logreg: "--series-1", xgboost: "--series-2", resnet: "--series-3" };
@@ -664,7 +667,7 @@ function renderDiagnostics() {
 async function main() {
   try {
     [bundle, dash] = await Promise.all(["data/model.json", "data/dashboard.json"].map(async (u) => {
-      const r = await fetch(u);
+      const r = await fetch(`${u}${VERSION}`);
       if (!r.ok) throw new Error(`${u}: ${r.status}`);
       return r.json();
     }));

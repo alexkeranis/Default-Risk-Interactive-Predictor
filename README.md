@@ -224,7 +224,9 @@ node --test docs/tests/parity.test.mjs     # browser model == Python pipeline
 | `test_export.py` | The JSON exported for the browser reproduces every calibration method for LR (1e-9) and XGBoost (1e-5, float32 accumulation). |
 
 [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs lint, pytest (CPU torch) and the Node
-parity test on every push and pull request.
+parity test on every push and pull request. [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+rebuilds the demo site from a clean checkout on every push to `main` (or a manual run) and deploys it to GitHub
+Pages. Each asset URL is stamped with the commit hash, so a deploy never serves stale JS, CSS or data.
 
 ## Interactive demo
 

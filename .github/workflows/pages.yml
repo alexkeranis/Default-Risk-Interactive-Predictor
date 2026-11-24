@@ -1,0 +1,69 @@
+name: pages
+
+# Rebuilds the static site from a clean checkout on every push to main and deploys it to GitHub Pages.
+# Every asset URL is stamped with the commit hash, so browsers and the Pages CDN can never serve a
+# stale app.js / model.js / styles.css / data JSON alongside a newer index.html.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Newest push wins: an in-flight deploy of an older commit is cancelled.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JS model parity with the Python pipelines
+        run: node --test docs/tests/parity.test.mjs
+
+      - name: Assemble site with cache-busted asset URLs
+        run: |
+          set -euo pipefail
+          V="${GITHUB_SHA::12}"
+          rm -rf _site
+          cp -r docs _site
+          rm -rf _site/tests
+
+          sed -i \
+            -e "s#href=\"assets/styles.css\"#href=\"assets/styles.css?v=$V\"#" \
+            -e "s#src=\"assets/app.js\"#src=\"assets/app.js?v=$V\"#" \
+            _site/index.html
+          sed -i "s#from \"./model.js\"#from \"./model.js?v=$V\"#" _site/assets/app.js
+
+          # Fail loudly if a reference was renamed and the stamp silently did not apply.
+          grep -q "assets/styles.css?v=$V" _site/index.html
+          grep -q "assets/app.js?v=$V" _site/index.html
+          grep -q "./model.js?v=$V" _site/assets/app.js
+          echo "Stamped assets with v=$V"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
