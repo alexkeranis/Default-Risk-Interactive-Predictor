@@ -849,8 +849,8 @@
     "macro_f1_bayes": 0.882553,
     "recall_High_bayes": 0.971154
   },
-  "trained_at": "2026-11-24T21:39:46+00:00",
-  "git_revision": "875b381d9dac47128f121260d0836e6a70899f8a-dirty",
+  "trained_at": "2026-11-24T22:18:42+00:00",
+  "git_revision": "8b0cc4108e56c4f05e6b81fb11cd26cb885428a6-dirty",
   "library_versions": {
     "python": "3.13.14",
     "numpy": "2.5.2",

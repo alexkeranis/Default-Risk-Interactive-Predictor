@@ -26,7 +26,7 @@ class NumericImputer(TransformerMixin, BaseEstimator):
     column (a stable output schema, even if a fold or a batch has no missing values).
 
     ``strategy="median"`` stores per-column training medians. ``strategy="knn"`` fits a
-    standardised KNN imputer on all numeric inputs (the original repo's approach, kept as
+    standardised KNN imputer on all numeric inputs (kept as
     an ablation)."""
 
     def __init__(self, strategy: str = "median", n_neighbors: int = 5):

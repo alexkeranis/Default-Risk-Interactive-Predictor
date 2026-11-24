@@ -1,6 +1,6 @@
 import { costOptimalTier, expectedPD, portfolioAtCutoff, predict } from "./model.js";
 
-const REPO = "https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment/blob/main/";
+const REPO = "https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment";
 const TIERS = ["Low", "Medium", "High"];
 const NAMES = { logreg: "Logistic regression", xgboost: "XGBoost", resnet: "Tabular ResNet" };
 const SLOT = { logreg: "--series-1", xgboost: "--series-2", resnet: "--series-3" };
@@ -18,6 +18,8 @@ const CAT_FIELDS = [
   { key: "Late_Payment_History", label: "Late payment history" },
   { key: "Shopping_Category_Most_Frequent", label: "Most frequent category" },
 ];
+const LABELS = Object.fromEntries([...NUM_FIELDS, ...CAT_FIELDS].map((f) => [f.key, f.label]));
+const FMT = Object.fromEntries(NUM_FIELDS.map((f) => [f.key, f.fmt]));
 const PRESETS = {
   prime: { Age: 41, Income_USD: 85000, Credit_Score: 760, Total_BNPL_Active_Loans: 1, Total_BNPL_Debt_USD: 120,
     Average_Transaction_Value_USD: 250, Employment_Status: "Employed", Late_Payment_History: "No",
@@ -29,6 +31,7 @@ const PRESETS = {
     Average_Transaction_Value_USD: 520, Employment_Status: "Unemployed", Late_Payment_History: "Yes",
     Shopping_Category_Most_Frequent: "Fashion" },
 };
+const PRESET_NAMES = { prime: "Prime", stretched: "Stretched student", delinquent: "Delinquent" };
 const BINARY = new Set([
   "loan_stacking", "subprime", "near_prime", "unstable_income", "late_x_subprime", "young_borrower",
   "missing_Income_USD", "missing_Credit_Score",
@@ -67,10 +70,22 @@ function luminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/** Paint the filled part of a range track (CSS reads --fill). */
+function setFill(input) {
+  const min = Number(input.min);
+  const max = Number(input.max);
+  const v = Number(input.value);
+  input.style.setProperty("--fill", `${max > min ? ((v - min) / (max - min)) * 100 : 0}%`);
+}
+
 // ---------------------------------------------------------------- state
 let bundle, dash;
 const state = { input: { ...PRESETS.stretched }, simModel: null, diagModel: null, cm: "confusion_argmax", cost: null };
 const charts = {};
+// "What changed" tracking: a gesture groups consecutive edits of the same control.
+let last = null; // { pd, approve } of the previous render
+let gesture = null; // { key, label, from, pd, approve, t }
+let pendingChange = null; // { key, label, from, to } set by a control before re-rendering
 
 function defaultCost() {
   const c = bundle.cost_assumptions;
@@ -98,7 +113,7 @@ function chartDefaults() {
     backgroundColor: css("--surface-1"),
     titleColor: css("--text-secondary"),
     bodyColor: css("--text-primary"),
-    borderColor: css("--border"),
+    borderColor: css("--border-strong"),
     borderWidth: 1,
     padding: 8,
     displayColors: false,
@@ -134,8 +149,11 @@ function buildForm() {
       "aria-label": f.label,
     });
     input.addEventListener("input", () => {
+      const from = state.input[f.key];
       state.input[f.key] = Number(input.value);
       out.textContent = f.fmt(input.value);
+      setFill(input);
+      pendingChange = { key: f.key, label: f.label, from: f.fmt(from), to: f.fmt(input.value) };
       renderSimulation();
     });
     box.append(el("div", { class: "field" }, [el("label", { for: input.id }, [el("span", { text: f.label }), out]), input]));
@@ -143,6 +161,7 @@ function buildForm() {
   for (const f of CAT_FIELDS) {
     const sel = el("select", { id: `f-${f.key}` }, schema.categorical[f.key].map((v) => el("option", { value: v, text: v })));
     sel.addEventListener("change", () => {
+      pendingChange = { key: f.key, label: f.label, from: state.input[f.key], to: sel.value };
       state.input[f.key] = sel.value;
       renderSimulation();
     });
@@ -153,7 +172,9 @@ function buildForm() {
 
 function syncForm() {
   for (const f of NUM_FIELDS) {
-    $(`f-${f.key}`).value = state.input[f.key];
+    const input = $(`f-${f.key}`);
+    input.value = state.input[f.key];
+    setFill(input);
     $(`o-${f.key}`).textContent = f.fmt(state.input[f.key]);
   }
   for (const f of CAT_FIELDS) $(`f-${f.key}`).value = state.input[f.key];
@@ -163,6 +184,36 @@ function scoreAll() {
   const out = {};
   for (const [fam, spec] of Object.entries(bundle.models)) out[fam] = predict(spec, state.input, bundle);
   return out;
+}
+
+/** Live "what changed" readout: groups a slider drag into one before -> after statement. */
+function renderChange(pd, approve) {
+  const box = $("change");
+  const now = performance.now();
+  if (pendingChange) {
+    const sameGesture = gesture && gesture.key === pendingChange.key && now - gesture.t < 1500;
+    if (!sameGesture && last) {
+      gesture = { key: pendingChange.key, label: pendingChange.label, from: pendingChange.from, pd: last.pd, approve: last.approve };
+    }
+    if (gesture) {
+      gesture.t = now;
+      const diff = (pd - gesture.pd) * 100;
+      const flipped = approve !== gesture.approve;
+      const arrow = Math.abs(diff) < 0.005 ? "unchanged" : `${diff > 0 ? "+" : "−"}${Math.abs(diff).toFixed(1)} pts`;
+      const what = pendingChange.key === "preset" ? `Loaded the “${pendingChange.to}” applicant`
+        : pendingChange.key === "reset" ? "Assumptions reset to defaults"
+          : gesture.from === pendingChange.to ? `${gesture.label} back to ${pendingChange.to}`
+            : `${gesture.label}: ${gesture.from} → ${pendingChange.to}`;
+      box.className = `change ${flipped ? "flip" : diff > 0.005 ? "up" : diff < -0.005 ? "down" : ""}`;
+      box.replaceChildren(
+        el("strong", { text: what }),
+        ` · expected PD ${pct(gesture.pd)} → ${pct(pd)} (${arrow})`,
+        flipped ? el("strong", { text: ` · decision flips to ${approve ? "Approve" : "Decline"}!` }) : " · decision unchanged",
+      );
+    }
+    pendingChange = null;
+  }
+  last = { pd, approve };
 }
 
 function renderSimulation() {
@@ -181,6 +232,7 @@ function renderSimulation() {
   );
   $("hero-pd").textContent = pct(pd);
   $("hero-caption").textContent = `expected probability of default · approve if ≤ ${pct(cost.cutoff)}`;
+  renderChange(pd, approve);
 
   // Tall segmented bar of tier probabilities (ordinal ramp).
   const bar = $("segbar");
@@ -207,8 +259,7 @@ function renderSimulation() {
   $("t-tier").textContent = TIERS[costOptimalTier(r.proba, cost)];
 
   // Every exported model, side by side.
-  const tbl = $("compare");
-  tbl.replaceChildren(
+  $("compare").replaceChildren(
     el("tr", {}, ["Model", "P(Low)", "P(Medium)", "P(High)", "Expected PD", "Decision"].map((h, i) =>
       el("th", { class: i ? "num" : "", text: h }))),
     ...Object.entries(results).map(([f, res]) => {
@@ -225,6 +276,7 @@ function renderSimulation() {
     }),
   );
   renderDrivers(r, fam);
+  return { pd, approve };
 }
 
 function renderDrivers(r, fam) {
@@ -236,29 +288,33 @@ function renderDrivers(r, fam) {
     delta: r.contributions[2][j] - r.contributions[0][j],
   }));
   const top = d.filter((x) => Math.abs(x.delta) > 1e-9).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 8);
-  const narrow = $("drivers-chart").parentElement.clientWidth < 480; // value moves to the tooltip
-  const labelOf = (x) => {
-    const base = bundle.feature_labels[x.name] ?? x.name;
-    if (BINARY.has(x.name) || base.includes(": ") || narrow) return base;
-    const v = USD_FEATURES.has(x.name) ? usd(x.value) : Math.abs(x.value) < 1 ? fx(x.value, 3) : fx(x.value, x.value % 1 ? 2 : 0);
-    return `${base} = ${v}`;
-  };
+  const narrow = $("drivers-chart").parentElement.clientWidth < 480; // values move to the tooltip
+  const isCategory = (x) => BINARY.has(x.name) || (bundle.feature_labels[x.name] ?? "").includes(": ");
+  const valueOf = (x) => (USD_FEATURES.has(x.name) ? usd(x.value)
+    : Math.abs(x.value) < 1 ? fx(x.value, 3) : fx(x.value, x.value % 1 ? 2 : 0));
+  const nameOf = (x) => bundle.feature_labels[x.name] ?? x.name;
+  const labelOf = (x) => (isCategory(x) || narrow ? nameOf(x) : `${nameOf(x)} = ${valueOf(x)}`);
   const bias = r.contributions[2][P] - r.contributions[0][P];
   $("drivers-caption").textContent =
-    `Contribution to the log-odds of High vs Low tier (before calibration; baseline ${fx(bias, 2)}). ` +
+    `Contribution of each factor to the log-odds of High vs Low tier (before calibration; baseline ${fx(bias, 2)}). ` +
     (spec.type === "linear" ? "Exact for logistic regression." : "Saabas path attributions for XGBoost.");
+
+  const labels = top.map(labelOf);
+  const values = top.map((x) => x.delta);
+  const colors = top.map((x) => (x.delta > 0 ? css("--neg") : css("--pos")));
+  const ch = charts["drivers-chart"];
+  if (ch && ch.$family === fam && ch.$narrow === narrow) {
+    // Update in place while dragging: no flicker, no re-layout.
+    ch.data.labels = labels;
+    ch.data.datasets[0].data = values;
+    ch.data.datasets[0].backgroundColor = colors;
+    ch.$top = top;
+    ch.update("none");
+    return;
+  }
   upsertChart("drivers-chart", {
     type: "bar",
-    data: {
-      labels: top.map(labelOf),
-      datasets: [{
-        data: top.map((x) => x.delta),
-        backgroundColor: top.map((x) => (x.delta > 0 ? css("--neg") : css("--pos"))),
-        borderRadius: 4,
-        borderSkipped: "start",
-        barThickness: 16,
-      }],
-    },
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: "start", barThickness: 16 }] },
     options: {
       indexAxis: "y",
       scales: {
@@ -269,8 +325,8 @@ function renderDrivers(r, fam) {
         tooltip: {
           callbacks: {
             title: (items) => {
-              const x = top[items[0].dataIndex];
-              return BINARY.has(x.name) || (bundle.feature_labels[x.name] ?? "").includes(": ") ? labelOf(x) : `${bundle.feature_labels[x.name] ?? x.name} = ${fx(x.value, 3)}`;
+              const x = charts["drivers-chart"].$top[items[0].dataIndex];
+              return isCategory(x) ? nameOf(x) : `${nameOf(x)} = ${valueOf(x)}`;
             },
             label: (c) => `${c.raw > 0 ? "+" : ""}${fx(c.raw, 3)} log-odds`,
           },
@@ -278,23 +334,95 @@ function renderDrivers(r, fam) {
       },
     },
   });
+  if (charts["drivers-chart"]) Object.assign(charts["drivers-chart"], { $family: fam, $narrow: narrow, $top: top });
+}
+
+// ---------------------------------------------------------------- "try this" prompts
+function scrollToDecision() {
+  const card = document.querySelector(".decision-card");
+  const r = card.getBoundingClientRect();
+  if (r.top < 60 || r.top > window.innerHeight * 0.6) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setField(key, value) {
+  pendingChange = {
+    key, label: LABELS[key],
+    from: FMT[key] ? FMT[key](state.input[key]) : state.input[key],
+    to: FMT[key] ? FMT[key](value) : value,
+  };
+  state.input[key] = value;
+  syncForm();
+  return renderSimulation();
+}
+
+let animating = null;
+function animateDebtUntilFlip() {
+  clearTimeout(animating);
+  const s = bundle.input_schema.numeric.Total_BNPL_Debt_USD;
+  const startApprove = last ? last.approve : true;
+  const dir = startApprove ? 1 : -1; // approved -> add debt until declined, and vice versa
+  const step = () => {
+    const next = Math.min(s.train_max, Math.max(s.train_min, state.input.Total_BNPL_Debt_USD + dir * 20));
+    if (next === state.input.Total_BNPL_Debt_USD) {
+      // Reached the edge of the training range without a flip: say so explicitly.
+      animating = null;
+      $("change").append(el("span", {
+        text: ` · no flip anywhere in the training range: for this applicant, debt alone ${startApprove ? "can't trigger a decline" : "can't earn an approval"}.`,
+      }));
+      return;
+    }
+    const { approve } = setField("Total_BNPL_Debt_USD", next);
+    animating = approve !== startApprove ? null : setTimeout(step, 22);
+  };
+  scrollToDecision();
+  step();
+}
+
+function bindTries() {
+  const actions = {
+    debt: animateDebtUntilFlip,
+    late: () => {
+      scrollToDecision();
+      setField("Late_Payment_History", state.input.Late_Payment_History === "Yes" ? "No" : "Yes");
+    },
+    income: () => {
+      const max = bundle.input_schema.numeric.Income_USD.train_max;
+      scrollToDecision();
+      setField("Income_USD", Math.min(max, Math.round((state.input.Income_USD * 2) / 500) * 500));
+    },
+    model: () => {
+      const next = state.simModel === "xgboost" ? bundle.selected : "xgboost";
+      pendingChange = { key: "model", label: "Model", from: NAMES[state.simModel], to: NAMES[next] };
+      state.simModel = next;
+      $("sim-model").value = next;
+      scrollToDecision();
+      renderSimulation();
+    },
+  };
+  for (const b of document.querySelectorAll("[data-try]")) b.addEventListener("click", () => actions[b.dataset.try]());
 }
 
 // ---------------------------------------------------------------- assumptions
 function bindAssumptions() {
-  const ids = { "a-pd0": ["pd", 0], "a-pd1": ["pd", 1], "a-pd2": ["pd", 2], "a-lgd": ["lgd"], "a-fee": ["merchant_fee"], "a-cut": ["cutoff"] };
-  for (const [id, [key, k]] of Object.entries(ids)) {
+  const ids = {
+    "a-pd0": ["pd", 0, "Assumed PD (Low)"], "a-pd1": ["pd", 1, "Assumed PD (Medium)"], "a-pd2": ["pd", 2, "Assumed PD (High)"],
+    "a-lgd": ["lgd", null, "Loss given default"], "a-fee": ["merchant_fee", null, "Merchant fee"], "a-cut": ["cutoff", null, "Approval cutoff"],
+  };
+  for (const [id, [key, k, label]] of Object.entries(ids)) {
     $(id).addEventListener("input", (e) => {
       const v = Number(e.target.value);
-      if (!Number.isFinite(v)) return;
+      if (!Number.isFinite(v) || e.target.value === "") return;
+      const before = key === "pd" ? state.cost.pd_by_tier[k] : state.cost[key];
       if (key === "pd") state.cost.pd_by_tier[k] = v;
       else state.cost[key] = v;
+      pendingChange = { key: id, label, from: `${before}`, to: `${v}` };
       onCostChange(id !== "a-cut");
     });
   }
   $("a-reset").addEventListener("click", () => {
     state.cost = defaultCost();
     syncAssumptions();
+    pendingChange = { key: "reset", label: "Assumptions", from: "edited", to: "defaults" };
     onCostChange(true);
   });
 }
@@ -317,7 +445,21 @@ function onCostChange(recomputeCurve) {
   else renderCutoff();
 }
 
-// ---------------------------------------------------------------- diagnostics
+// ---------------------------------------------------------------- masthead + diagnostics
+function renderStats() {
+  const sel = dash.selected;
+  const t = dash.test[sel];
+  const stat = (label, value, note) =>
+    el("div", { class: "stat" }, [el("div", { class: "stat-label", text: label }), el("div", { class: "stat-value", text: value }), el("div", { class: "stat-note", text: note })]);
+  const d = dash.decisions[sel].test;
+  $("stat-strip").replaceChildren(
+    stat("Deployed model", NAMES[sel], `${dash.calibration[sel].chosen} calibration`),
+    stat("Test macro F1", fx(t.calibrated.macro_f1), `95% CI ${fx(t.ci95.macro_f1[0])}–${fx(t.ci95.macro_f1[1])}`),
+    stat("High-risk recall", pct(t.calibrated.recall_High, 0), `precision ${pct(t.calibrated.precision_High, 0)}`),
+    stat("Approval at trained cutoff", pct(d.approval_rate, 0), `${pct(d.high_rate_approved, 1)} High tier approved`),
+  );
+}
+
 function renderBenchmark() {
   const fams = ["logreg", "xgboost", "resnet"];
   const pm = (m, k, d = 3) => `${fx(m[k].mean, d)} ± ${fx(m[k].std, d)}`;
@@ -347,22 +489,23 @@ function renderBenchmark() {
   const e = dash.experiment;
   $("bench-caption").textContent = `${e.cv.scheme} on ${e.data.n_dev} development rows; test n = ${e.data.n_test}`;
 
-  const legacyNum = dash.ablations["legacy_xgb/numeric_only"].macro_f1.mean;
-  const legacyCat = dash.ablations["legacy_xgb/with_categoricals"].macro_f1.mean;
-  $("legacy").replaceChildren(
-    el("strong", { text: "The old 0.84 vs 0.75 claim, corrected. " }),
-    `Re-running the original XGBoost configuration under this protocol gives macro F1 ${fx(legacyNum)} on numeric ` +
-      `features only (what the old notebook fed it) and ${fx(legacyCat)} once the categorical features are included. ` +
-      "Withholding two columns, not the neural network, produced the gap.",
+  const a = dash.ablations;
+  $("insight").replaceChildren(
+    el("strong", { text: "What the features buy. " }),
+    `Engineered ratios cut cross-validated log loss from ${fx(a["logreg/raw_features"].log_loss.mean)} to ` +
+      `${fx(dash.cv.logreg.log_loss.mean)} for logistic regression (XGBoost: ${fx(a["xgboost/raw_features"].log_loss.mean)} → ` +
+      `${fx(dash.cv.xgboost.log_loss.mean)}). Employment status and late-payment history are essential: without them a ` +
+      `fixed-config XGBoost reaches macro F1 ${fx(a["categorical_ablation/numeric_only"].macro_f1.mean)}, versus ` +
+      `${fx(a["categorical_ablation/all_inputs"].macro_f1.mean)} with them.`,
   );
 
   const f1s = fams.map((f) => dash.cv[f].macro_f1.mean);
   const sig = dash.comparisons.filter((c) => c.metric === "macro_f1" && NAMES[c.a] && NAMES[c.b] && c.p < 0.05);
   $("diag-lede").textContent =
-    `Cross-validated macro F1 ranges from ${fx(Math.min(...f1s))} to ${fx(Math.max(...f1s))} across the three families; ` +
+    `Cross-validated macro F1 ranges from ${fx(Math.min(...f1s))} to ${fx(Math.max(...f1s))} across the three model families; ` +
     (sig.length ? `${sig.length} pairwise difference(s) are significant at 5% (corrected t-test). `
       : "no pairwise difference is significant at 5% (corrected t-test). ") +
-    `${NAMES[dash.selected]} is deployed under the pre-registered rule: the simplest model within one standard error of the best log loss.`;
+    `${NAMES[dash.selected]} is deployed under a pre-registered rule: the simplest model within one standard error of the best log loss.`;
 }
 
 function renderReliability() {
@@ -445,7 +588,7 @@ function renderImportance() {
     caption = fam === "xgboost" ? "Mean |TreeSHAP| for the High tier, test set (log-odds)." : "Mean |coefficient × standardised value| for the High tier, test set (log-odds).";
   } else {
     rows = dash.permutation_importance[fam].slice(0, 9).map((r) => ({ label: r.feature, v: r.importance }));
-    caption = "Permutation importance: increase in test log loss when one raw input is shuffled (no exact attribution for the network).";
+    caption = "Permutation importance: increase in test log loss when one raw input is shuffled.";
   }
   $("imp-caption").textContent = caption;
   upsertChart("imp-chart", {
@@ -476,7 +619,7 @@ function renderCostCurve() {
     data: pts.map((p) => ({ x: p.approval_rate, y: p[key] })),
     showLine: true, borderColor: color, borderWidth: 2, pointRadius: 0, pointHitRadius: 8,
   });
-  const marker = { data: [], pointRadius: 6, pointBackgroundColor: color, pointBorderColor: css("--surface-1"), pointBorderWidth: 2 };
+  const marker = { data: [], pointRadius: 7, pointBackgroundColor: css("--accent-amber"), pointBorderColor: css("--surface-1"), pointBorderWidth: 2 };
   const opts = (yfmt) => ({
     scales: {
       x: axis({ min: 0.6, max: 1, ticks: { callback: (v) => pct(v, 0) }, title: { display: true, text: "approval rate", color: css("--muted") } }),
@@ -494,7 +637,9 @@ function renderCutoff() {
   const tp = dash.test_predictions;
   const c = state.cost.cutoff;
   const p = portfolioAtCutoff(tp[fam], tp.y, tp.exposure, state.cost, c);
-  $("cut-slider").value = cutoffToSlider(c);
+  const slider = $("cut-slider");
+  slider.value = cutoffToSlider(c);
+  setFill(slider);
   $("cut-value").textContent = pct(c, 2);
   $("c-appr").textContent = pct(p.approval_rate);
   $("c-bad").textContent = pct(p.medhigh_rate_approved, 2);
@@ -516,35 +661,7 @@ function renderDiagnostics() {
   renderCostCurve();
 }
 
-function renderAll() {
-  chartDefaults();
-  renderBenchmark();
-  renderSimulation();
-  renderDiagnostics();
-}
-
-function initTheme() {
-  try {
-    const saved = localStorage.getItem("theme");
-    if (saved) document.documentElement.dataset.theme = saved;
-  } catch {
-    /* storage unavailable: follow the OS setting */
-  }
-  $("theme-toggle").addEventListener("click", () => {
-    const current = document.documentElement.dataset.theme
-      || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = current === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("theme", next); } catch { /* ignore */ }
-    renderAll();
-  });
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (!document.documentElement.dataset.theme) renderAll();
-  });
-}
-
 async function main() {
-  initTheme();
   try {
     [bundle, dash] = await Promise.all(["data/model.json", "data/dashboard.json"].map(async (u) => {
       const r = await fetch(u);
@@ -556,8 +673,8 @@ async function main() {
     $("load-error").hidden = false;
     return;
   }
-  $("audit-link").href = `${REPO}reports/AUDIT.md`;
-  $("bench-link").href = `${REPO}reports/benchmark.md`;
+  $("bench-link").href = `${REPO}/blob/main/reports/benchmark.md`;
+  $("repo-link").href = REPO;
   state.cost = defaultCost();
   state.simModel = bundle.selected;
   state.diagModel = dash.selected;
@@ -565,7 +682,11 @@ async function main() {
   const simSel = $("sim-model");
   simSel.replaceChildren(...Object.keys(bundle.models).map((f) => el("option", { value: f, text: `${NAMES[f]}${f === bundle.selected ? " (deployed)" : ""}` })));
   simSel.value = state.simModel;
-  simSel.addEventListener("change", () => { state.simModel = simSel.value; renderSimulation(); });
+  simSel.addEventListener("change", () => {
+    pendingChange = { key: "model", label: "Model", from: NAMES[state.simModel], to: NAMES[simSel.value] };
+    state.simModel = simSel.value;
+    renderSimulation();
+  });
 
   const diagSel = $("diag-model");
   diagSel.replaceChildren(...["logreg", "xgboost", "resnet"].map((f) => el("option", { value: f, text: NAMES[f] })));
@@ -574,6 +695,8 @@ async function main() {
 
   for (const b of document.querySelectorAll("[data-preset]")) {
     b.addEventListener("click", () => {
+      pendingChange = { key: "preset", label: "Applicant", from: "current", to: PRESET_NAMES[b.dataset.preset] };
+      gesture = null;
       state.input = { ...PRESETS[b.dataset.preset] };
       syncForm();
       renderSimulation();
@@ -587,16 +710,29 @@ async function main() {
     });
   }
   $("cut-slider").addEventListener("input", (e) => {
+    const before = state.cost.cutoff;
     state.cost.cutoff = sliderToCutoff(Number(e.target.value));
     $("a-cut").value = Number(state.cost.cutoff.toFixed(4));
+    pendingChange = { key: "cutoff", label: "Approval cutoff", from: pct(before, 2), to: pct(state.cost.cutoff, 2) };
     renderCutoff();
     renderSimulation();
   });
 
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(renderSimulation, 150); // re-fit driver labels to the new width
+  });
+
+  chartDefaults();
   buildForm();
   syncAssumptions();
   bindAssumptions();
-  renderAll();
+  bindTries();
+  renderStats();
+  renderBenchmark();
+  renderSimulation();
+  renderDiagnostics();
 }
 
 main();

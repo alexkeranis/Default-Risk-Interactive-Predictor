@@ -174,7 +174,7 @@ def fig_calibration_weighted(results: dict, out: Path):
                 "+ Bayes prior correction" if best == "prior_shift" else f"+ {best} calibration",
             ),
         ],
-        "Logistic regression with inverse-frequency class weights (the original design): "
+        "Logistic regression with inverse-frequency class weights: "
         "raw vs repaired probabilities, out-of-fold on dev",
         "calibration_weighted.png",
         out,
@@ -424,7 +424,7 @@ def benchmark_markdown(results: dict, meta: dict) -> str:
             )
 
     cw = results["calibration_class_weighted"]
-    w("\n### Repairing class-weighted probabilities (the original design)\n")
+    w("\n### Class-weighted training and probability repair\n")
     w(
         "Same logistic regression, `class_weight='balanced'`, out-of-fold on dev. Inverse-frequency "
         "weights make the implied class priors uniform, so raw probabilities overstate Medium risk "
@@ -472,10 +472,10 @@ def benchmark_markdown(results: dict, meta: dict) -> str:
                 f"{_pm(a, 'pr_auc_High')} |"
             )
     for k, label in (
-        ("numeric_only", "Original XGBoost config, numeric features only (as in the old notebook)"),
-        ("with_categoricals", "Original XGBoost config, with categorical features"),
+        ("numeric_only", "XGBoost (fixed config): numeric inputs + DTI only"),
+        ("all_inputs", "XGBoost (fixed config): numeric + categorical inputs"),
     ):
-        a = results["ablations"][f"legacy_xgb/{k}"]
+        a = results["ablations"][f"categorical_ablation/{k}"]
         w(f"| {label} | {_pm(a, 'log_loss', 4)} | {_pm(a, 'macro_f1')} | {_pm(a, 'pr_auc_High')} |")
 
     w("\n## Cost-sensitive decisions (test set; cutoff chosen on dev out-of-fold predictions)\n")

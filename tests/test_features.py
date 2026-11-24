@@ -22,7 +22,7 @@ def test_hand_computed_values(good_frame):
 
 
 def test_zero_income_maps_to_maximum_leverage_not_zero(good_frame):
-    """Regression test for the original bug: income 0 -> DTI 0 -> 'safest' applicant."""
+    """Income 0 must never yield DTI 0, which would score as the 'safest' applicant."""
     f = engineer(good_frame.assign(Income_USD=0.0)).iloc[0]
     assert f["bnpl_dti"] == pytest.approx(380 / INCOME_FLOOR_USD)
     assert f["bnpl_dti"] > engineer(good_frame).iloc[0]["bnpl_dti"]

@@ -1926,7 +1926,7 @@
         "std": 0.001385
       }
     },
-    "legacy_xgb/numeric_only": {
+    "categorical_ablation/numeric_only": {
       "macro_f1": {
         "mean": 0.792143,
         "std": 0.018592
@@ -2024,7 +2024,7 @@
         "std": 0.001483
       }
     },
-    "legacy_xgb/with_categoricals": {
+    "categorical_ablation/all_inputs": {
       "macro_f1": {
         "mean": 0.886493,
         "std": 0.015999
@@ -4743,5 +4743,5 @@
     "f1_High",
     "ece_High"
   ],
-  "runtime_seconds": 337.801097
+  "runtime_seconds": 329.603015
 }

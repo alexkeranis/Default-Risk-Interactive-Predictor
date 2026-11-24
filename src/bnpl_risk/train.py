@@ -146,9 +146,9 @@ def _calibration_job(family, params, method, X, y, tr, va):
     return method, va, m.predict_proba(X.iloc[va])
 
 
-def legacy_xgb(with_categoricals: bool):
-    """The original notebook's XGBoost configuration, evaluated leak-free, with and without
-    the categorical features it was (accidentally) denied."""
+def fixed_config_xgb(with_categoricals: bool):
+    """Categorical-input ablation: an untuned, fixed XGBoost configuration evaluated on the
+    numeric inputs (+ debt-to-income) alone, or with the one-hot categorical inputs added."""
     cols = [*NUMERIC_COLS, "bnpl_dti"]
     transformers = [("num", "passthrough", cols)]
     if with_categoricals:
@@ -326,7 +326,7 @@ def run(cfg: RunConfig) -> dict:
             f"macro_f1={np.mean([m['macro_f1'] for m in cv_folds[fam]]):.4f}"
         )
 
-    # 3. Ablations on the same folds (feature set, imputer, original XGB protocol)
+    # 3. Ablations on the same folds (feature set, imputer, categorical inputs)
     ablations = {}
     for fam in ("logreg", "xgboost"):
         for name, kw in {
@@ -336,8 +336,8 @@ def run(cfg: RunConfig) -> dict:
             folds, _ = run_cv(make_model(fam, **kw, **params[fam]), X, y, splits, cfg.n_jobs)
             ablations[f"{fam}/{name}"] = folds
     for with_cat in (False, True):
-        key = "legacy_xgb/" + ("with_categoricals" if with_cat else "numeric_only")
-        ablations[key], _ = run_cv(legacy_xgb(with_cat), X, y, splits, cfg.n_jobs)
+        key = "categorical_ablation/" + ("all_inputs" if with_cat else "numeric_only")
+        ablations[key], _ = run_cv(fixed_config_xgb(with_cat), X, y, splits, cfg.n_jobs)
     log("ablations done")
 
     # 4. Paired comparisons (Nadeau-Bengio corrected t-test)
@@ -410,8 +410,8 @@ def run(cfg: RunConfig) -> dict:
         }
         log(f"calibration {fam}: {chosen}")
 
-    # 6b. Why calibration matters: the original design (inverse-frequency class weights)
-    # distorts the implied priors. Same LR, balanced weights, every post-hoc repair.
+    # 6b. Class-weighted training (inverse-frequency weights) distorts the implied priors.
+    # Same LR, balanced weights, every post-hoc repair.
     cw_params = {**params["logreg"], "class_weight": "balanced"}
     cw_jobs = [
         delayed(_calibration_job)("logreg", cw_params, m, X, y, tr, va)

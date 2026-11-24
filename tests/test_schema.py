@@ -70,7 +70,7 @@ def test_extra_columns_are_ignored(good_frame):
 
 def test_out_of_support_values_are_flagged_not_silenced(good_row, raw):
     support = training_support(raw)
-    df = _with(good_row, Total_BNPL_Debt_USD=23_500, Age=90)  # the old README demo debt
+    df = _with(good_row, Total_BNPL_Debt_USD=23_500, Age=90)  # 8.6x the training max
     res = validate_frame(df, support)
     assert res.valid_mask.all()  # still a legal input...
     assert set(res.ood_flags.iloc[0]) == {"Total_BNPL_Debt_USD", "Age"}  # ...but flagged

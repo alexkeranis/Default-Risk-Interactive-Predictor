@@ -64,7 +64,7 @@ HARD_LIMITS: dict[str, tuple[float, float | None]] = {
 
 # Income below this is treated as this value inside ratio features. It equals the
 # floor observed in the source data, so a zero/near-zero income maps to *maximum*
-# leverage rather than to a division-by-zero fallback of 0 (the original bug).
+# leverage rather than to a division-by-zero fallback of 0.
 INCOME_FLOOR_USD = 5_000.0
 
 # ---------------------------------------------------------------- experiment design
