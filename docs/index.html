@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BNPL Risk Lab</title>
+  <meta name="description" content="Leak-free, calibrated BNPL default-risk model: in-browser underwriting simulator and model diagnostics." />
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#simulator">BNPL Risk Lab</a>
+      <nav aria-label="Sections">
+        <a href="#simulator">Simulator</a>
+        <a href="#diagnostics">Diagnostics</a>
+        <a href="#method">Method</a>
+      </nav>
+      <button id="theme-toggle" class="ghost" type="button" aria-label="Toggle dark mode">Theme</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <aside class="banner" role="note">
+      <strong>Synthetic benchmark data.</strong>
+      The model is trained on a public Kaggle dataset whose labels are risk <em>tiers</em> produced by a
+      near-deterministic rule, not observed defaults. Probabilities and dollar figures use illustrative
+      assumptions you can edit below. This is a methodology demo, not a credit product.
+    </aside>
+
+    <!-- ===================================================== simulator -->
+    <section id="simulator" aria-labelledby="sim-title">
+      <h1 id="sim-title">Underwriting simulator</h1>
+      <p class="lede">
+        Every number on this page is computed in your browser from model weights exported by the
+        training pipeline: feature engineering, model, and probability calibration. There is no server.
+        Sliders are bounded to the range seen in training, so the model never extrapolates.
+      </p>
+
+      <div class="sim-grid">
+        <form id="applicant" class="card" autocomplete="off">
+          <div class="card-head">
+            <h2>Applicant</h2>
+            <div class="presets" role="group" aria-label="Example applicants">
+              <button type="button" class="chip" data-preset="prime">Prime</button>
+              <button type="button" class="chip" data-preset="stretched">Stretched student</button>
+              <button type="button" class="chip" data-preset="delinquent">Delinquent</button>
+            </div>
+          </div>
+          <div id="fields" class="fields"></div>
+        </form>
+
+        <div class="results">
+          <div class="card" aria-live="polite">
+            <div class="card-head">
+              <h2>Decision</h2>
+              <label class="inline">Model
+                <select id="sim-model"></select>
+              </label>
+            </div>
+            <div class="decision-row">
+              <div id="decision" class="decision"></div>
+              <div class="decision-detail">
+                <div class="hero" id="hero-pd">–</div>
+                <div class="muted" id="hero-caption">expected probability of default</div>
+              </div>
+            </div>
+            <div class="segbar" id="segbar" role="img"></div>
+            <div class="seg-legend" id="seg-legend"></div>
+            <div class="tiles">
+              <div class="tile"><div class="tile-label">Expected loss on this purchase</div><div class="tile-value" id="t-loss">–</div></div>
+              <div class="tile"><div class="tile-label">Merchant fee revenue</div><div class="tile-value" id="t-rev">–</div></div>
+              <div class="tile"><div class="tile-label">Cost-optimal tier</div><div class="tile-value" id="t-tier">–</div></div>
+            </div>
+            <div class="table-scroll"><table class="mini" id="compare" aria-label="All exported models for this applicant"></table></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Top risk drivers</h2>
+            </div>
+            <p class="muted small" id="drivers-caption"></p>
+            <div class="chart-box" style="height: 300px"><canvas id="drivers-chart"></canvas></div>
+            <div class="key">
+              <span><i class="swatch" style="background: var(--neg)"></i>raises High-risk odds</span>
+              <span><i class="swatch" style="background: var(--pos)"></i>lowers High-risk odds</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <details class="card assumptions" id="assumptions">
+        <summary><h2>Unit economics assumptions</h2><span class="muted small">shared by the simulator and the cost curve</span></summary>
+        <div class="assume-grid">
+          <label>Assumed PD, Low tier <input type="number" id="a-pd0" step="0.005" min="0" max="1" /></label>
+          <label>Assumed PD, Medium tier <input type="number" id="a-pd1" step="0.01" min="0" max="1" /></label>
+          <label>Assumed PD, High tier <input type="number" id="a-pd2" step="0.01" min="0" max="1" /></label>
+          <label>Loss given default <input type="number" id="a-lgd" step="0.05" min="0" max="1" /></label>
+          <label>Merchant fee (share of purchase) <input type="number" id="a-fee" step="0.005" min="0" max="0.2" /></label>
+          <label>Approval cutoff on expected PD <input type="number" id="a-cut" step="0.001" min="0" max="1" /></label>
+        </div>
+        <p class="muted small">
+          Break-even PD = fee ÷ LGD = <strong id="a-breakeven">–</strong>. The trained cutoff was chosen to maximise
+          the profit proxy on out-of-fold development predictions under the default assumptions.
+          <button type="button" class="link" id="a-reset">Reset defaults</button>
+        </p>
+      </details>
+    </section>
+
+    <!-- ===================================================== diagnostics -->
+    <section id="diagnostics" aria-labelledby="diag-title">
+      <h1 id="diag-title">Model diagnostics</h1>
+      <p class="lede" id="diag-lede"></p>
+
+      <div class="card">
+        <div class="card-head"><h2>Benchmark</h2><span class="muted small" id="bench-caption"></span></div>
+        <div class="table-scroll"><table class="bench" id="bench"></table></div>
+        <div class="callout" id="legacy"></div>
+      </div>
+
+      <div class="filter-row" role="group" aria-label="Filter">
+        <label class="inline">Model shown below
+          <select id="diag-model"></select>
+        </label>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Calibration on the held-out test set</h2><span class="muted small" id="rel-caption"></span></div>
+        <div class="multiples">
+          <figure><figcaption>P(Low)</figcaption><div class="chart-box sq"><canvas id="rel-0"></canvas></div></figure>
+          <figure><figcaption>P(Medium)</figcaption><div class="chart-box sq"><canvas id="rel-1"></canvas></div></figure>
+          <figure><figcaption>P(High)</figcaption><div class="chart-box sq"><canvas id="rel-2"></canvas></div></figure>
+        </div>
+        <div class="key">
+          <span><i class="line" style="background: var(--muted)"></i>uncalibrated</span>
+          <span><i class="line" id="rel-key" style="background: var(--series-1)"></i>calibrated</span>
+          <span><i class="line" style="background: var(--axis)"></i>perfect calibration</span>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-head">
+            <h2>Confusion matrix (test)</h2>
+            <div class="seg-toggle" role="group" aria-label="Decision rule">
+              <button type="button" class="chip on" data-cm="confusion_argmax">Argmax</button>
+              <button type="button" class="chip" data-cm="confusion_bayes">Cost-optimal</button>
+            </div>
+          </div>
+          <table class="cm" id="cm"></table>
+          <p class="muted small" id="cm-caption"></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Global drivers</h2></div>
+          <p class="muted small" id="imp-caption"></p>
+          <div class="chart-box" style="height: 320px"><canvas id="imp-chart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Approval cutoff trade-off (test set)</h2></div>
+        <label class="slider-label" for="cut-slider">Approve if expected PD ≤ <strong id="cut-value">–</strong></label>
+        <input type="range" id="cut-slider" min="0" max="1000" step="1" />
+        <div class="tiles four">
+          <div class="tile"><div class="tile-label">Approval rate</div><div class="tile-value" id="c-appr">–</div></div>
+          <div class="tile"><div class="tile-label">Medium/High among approved</div><div class="tile-value" id="c-bad">–</div></div>
+          <div class="tile"><div class="tile-label">High-tier applicants declined</div><div class="tile-value" id="c-cap">–</div></div>
+          <div class="tile"><div class="tile-label">Profit proxy per applicant</div><div class="tile-value" id="c-profit">–</div></div>
+        </div>
+        <div class="two-col tight">
+          <figure><figcaption>Bad rate among approved vs approval rate</figcaption><div class="chart-box" style="height: 260px"><canvas id="curve-bad"></canvas></div></figure>
+          <figure><figcaption>Profit proxy per applicant vs approval rate</figcaption><div class="chart-box" style="height: 260px"><canvas id="curve-profit"></canvas></div></figure>
+        </div>
+        <p class="muted small">
+          Profit proxy = merchant fee × purchase − LGD × assumed PD of the applicant's <em>true</em> tier × purchase,
+          summed over approved applicants and divided by all applicants. It depends entirely on the assumptions above.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================================================== method -->
+    <section id="method" aria-labelledby="method-title">
+      <h1 id="method-title">Method</h1>
+      <div class="prose card">
+        <h2>What changed from the original project</h2>
+        <p>
+          The original README reported PyTorch macro F1 0.84 vs XGBoost 0.75. An audit found that the network was
+          early-stopped and checkpointed on the <em>test</em> set, and that XGBoost was trained without the categorical
+          features. Under a leak-free protocol the gap disappears: all three families are statistically tied on macro F1, and the network is the weakest on log loss.
+          <a id="audit-link" href="#">Read the audit</a> · <a id="bench-link" href="#">Full benchmark report</a>.
+        </p>
+        <h2>Protocol</h2>
+        <ul>
+          <li>Stratified 80/20 development/test split. The test set is scored exactly once.</li>
+          <li>One scikit-learn pipeline (imputation → domain features → encoding → model → calibration) fit inside every fold. The same serialized object serves single and batch inference.</li>
+          <li>Equal tuning budget per family, inner 5-fold CV, scored by log loss (a proper scoring rule).</li>
+          <li>Repeated stratified 5×3 CV for model comparison, with the Nadeau–Bengio corrected t-test. A pre-registered 1-SE rule prefers the simpler model.</li>
+          <li>Post-hoc calibration (sigmoid, isotonic or temperature) chosen on out-of-fold Brier score. Cutoffs are chosen on out-of-fold predictions.</li>
+        </ul>
+        <h2>How the browser reproduces the model</h2>
+        <p>
+          The pipeline exports the fitted coefficients, tree structures, imputation medians and calibration maps to JSON.
+          <code>assets/model.js</code> re-implements only arithmetic. A CI test checks it against predictions from the fitted
+          Python pipelines: logistic regression to 1e-9, and XGBoost to 1e-5 (XGBoost accumulates in float32).
+          Driver attributions are exact for logistic regression and Saabas path attributions for XGBoost, in log-odds space.
+        </p>
+        <h2>Limitations</h2>
+        <ul>
+          <li>Synthetic labels: a near-deterministic rule on debt-to-income, late payments and employment, so scores here overstate what real bureau data allows.</li>
+          <li>Tiers are not defaults: every dollar figure depends on the assumed PD per tier.</li>
+          <li>No time dimension: there are no vintages, so no out-of-time validation and no drift monitoring.</li>
+          <li>No fairness review: age and employment status are protected or sensitive in many jurisdictions and would need legal review before any real use.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap footer muted small">
+    Built from <code>python -m bnpl_risk.train</code> and <code>python -m bnpl_risk.export_web</code>. MIT licensed.
+  </footer>
+
+  <div id="load-error" class="load-error" hidden>
+    Could not load the model data. If you opened this file directly, serve the folder instead:
+    <code>python -m http.server -d docs</code>, then open http://localhost:8000.
+  </div>
+</body>
+</html>
