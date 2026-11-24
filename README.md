@@ -2,11 +2,13 @@
 
 [![tests](https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment/actions/workflows/tests.yml/badge.svg)](https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment/actions/workflows/tests.yml)
 
+**[Live demo: underwriting simulator and model diagnostics](https://alexkeranis.github.io/Buy-Now-Pay-Later---Default-Risk-Assessment/)**
+
 A Buy Now, Pay Later provider must decide whether to finance a purchase at checkout, in milliseconds.
 This project estimates each applicant's probability of falling into a **Low / Medium / High** default-risk
 tier, calibrates those probabilities, and turns them into an approve/decline decision under explicit unit
 economics. Everything runs through one scikit-learn pipeline: training, cross-validation, batch and
-single-record serving, and a zero-backend [browser demo](#interactive-demo).
+single-record serving, and a zero-backend [browser demo](https://alexkeranis.github.io/Buy-Now-Pay-Later---Default-Risk-Assessment/).
 
 > **Read this first: the data is synthetic.** The labels follow a near-deterministic rule (a depth-4
 > decision tree reaches 0.84 macro F1). Every number below is a *benchmark on a synthetic generator*, not an
@@ -249,9 +251,9 @@ JSON exported from the fitted pipelines.
   (argmax vs cost-optimal), global drivers, and a cutoff slider that recomputes approval rate, bad rate and
   profit on the test set.
 
-**Publish on GitHub Pages:** Settings → Pages → *Deploy from a branch* → `main`, folder `/docs`. To preview
-locally, run `python -m http.server -d docs` and open http://localhost:8000. Browsers block `fetch` from
-`file://`, so opening the HTML file directly won't load the data.
+**Live at https://alexkeranis.github.io/Buy-Now-Pay-Later---Default-Risk-Assessment/**. To run it locally,
+use `python -m http.server -d docs` and open http://localhost:8000. Browsers block `fetch` from `file://`,
+so opening the HTML file directly won't load the data.
 
 ## Project layout
 
