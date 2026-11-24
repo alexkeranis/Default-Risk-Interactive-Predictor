@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="only light" />
-  <title>BNPL Risk Lab</title>
-  <meta name="description" content="Calibrated BNPL default-risk model: in-browser underwriting simulator and model diagnostics." />
+  <title>BNPL Default Risk</title>
+  <meta name="description" content="Calibrated default-risk model for Buy Now, Pay Later applicants, with an in-browser underwriting simulator and model diagnostics." />
   <link rel="stylesheet" href="assets/styles.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
   <script type="module" src="assets/app.js"></script>
@@ -13,7 +13,7 @@
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>BNPL Risk Lab</a>
+      <a class="brand" href="#top">BNPL Default Risk</a>
       <nav aria-label="Sections">
         <a href="#simulator">Simulator</a>
         <a href="#diagnostics">Diagnostics</a>
@@ -26,16 +26,16 @@
     <!-- ===================================================== masthead -->
     <section class="masthead">
       <p class="eyebrow">Buy Now, Pay Later · credit risk</p>
-      <h1>Score an applicant, watch the model reason.</h1>
+      <h1>Score a BNPL applicant in your browser</h1>
       <p class="lede">
-        A calibrated default-risk model that runs entirely in your browser. Move the sliders, and the risk tier,
-        expected loss and approve/decline decision update instantly, along with the factors that drove them.
+        A calibrated default-risk model that runs entirely client-side. Change the applicant's details and the risk
+        tier, expected loss and approve/decline decision update immediately, together with the factors behind them.
       </p>
       <div class="stat-strip" id="stat-strip"></div>
       <aside class="banner" role="note">
         <strong>Synthetic benchmark data.</strong>
         Trained on a public Kaggle dataset whose labels are risk <em>tiers</em> produced by a near-deterministic rule,
-        not observed defaults. Dollar figures use illustrative assumptions you can edit. A methodology demo, not a credit product.
+        not observed defaults. Dollar figures use illustrative assumptions you can edit. This page demonstrates the method and is not a credit product.
       </aside>
     </section>
 
@@ -49,8 +49,8 @@
       <div class="play">
         <div class="play-icon" aria-hidden="true">▶</div>
         <div>
-          <h3>Play with it: change anything and see what happens</h3>
-          <p>Every number below is recomputed live from the exported model weights. A few things to try:</p>
+          <h3>Things to try</h3>
+          <p>Every number below is computed in the browser from the exported model weights.</p>
           <ul class="play-list">
             <li><button type="button" class="try" data-try="debt">Slide <strong>outstanding debt</strong> until the decision flips</button></li>
             <li><button type="button" class="try" data-try="late">Switch <strong>late payment history</strong> to “Yes”</button></li>
@@ -136,7 +136,7 @@
     <section id="diagnostics" class="panel accent-amber" aria-labelledby="diag-title">
       <header class="panel-head">
         <p class="eyebrow">02 · Diagnostics</p>
-        <h2 id="diag-title">How well does it work?</h2>
+        <h2 id="diag-title">Model performance</h2>
         <p class="lede" id="diag-lede"></p>
       </header>
 
@@ -153,41 +153,14 @@
       </div>
 
       <div class="card">
-        <div class="card-head"><h3>Calibration on the held-out test set</h3><span class="muted small" id="rel-caption"></span></div>
-        <div class="multiples">
-          <figure><figcaption>P(Low)</figcaption><div class="chart-box sq"><canvas id="rel-0"></canvas></div></figure>
-          <figure><figcaption>P(Medium)</figcaption><div class="chart-box sq"><canvas id="rel-1"></canvas></div></figure>
-          <figure><figcaption>P(High)</figcaption><div class="chart-box sq"><canvas id="rel-2"></canvas></div></figure>
-        </div>
-        <div class="key">
-          <span><i class="line" style="background: var(--muted)"></i>uncalibrated</span>
-          <span><i class="line" id="rel-key" style="background: var(--series-1)"></i>calibrated</span>
-          <span><i class="line" style="background: var(--axis)"></i>perfect calibration</span>
-        </div>
-      </div>
-
-      <div class="two-col">
-        <div class="card">
-          <div class="card-head">
-            <h3>Confusion matrix (test)</h3>
-            <div class="seg-toggle" role="group" aria-label="Decision rule">
-              <button type="button" class="chip on" data-cm="confusion_argmax">Argmax</button>
-              <button type="button" class="chip" data-cm="confusion_bayes">Cost-optimal</button>
-            </div>
-          </div>
-          <div class="table-scroll"><table class="cm" id="cm"></table></div>
-          <p class="muted small" id="cm-caption"></p>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>Global drivers</h3></div>
-          <p class="muted small" id="imp-caption"></p>
-          <div class="chart-box imp-box"><canvas id="imp-chart"></canvas></div>
-        </div>
+        <div class="card-head"><h3>Global drivers</h3></div>
+        <p class="muted small" id="imp-caption"></p>
+        <div class="chart-box imp-box"><canvas id="imp-chart"></canvas></div>
       </div>
 
       <div class="card">
         <div class="card-head"><h3>Approval cutoff trade-off (test set)</h3></div>
-        <p class="muted small">Drag the cutoff: a stricter policy approves fewer applicants but lets fewer risky ones through.</p>
+        <p class="cut-explain" id="cut-explain"></p>
         <div class="field cut-field">
           <label for="cut-slider"><span>Approve if expected PD ≤</span><output id="cut-value">–</output></label>
           <input type="range" id="cut-slider" min="0" max="1000" step="1" />

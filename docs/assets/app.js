@@ -1,6 +1,10 @@
 import { costOptimalTier, expectedPD, portfolioAtCutoff, predict } from "./model.js";
 
-const REPO = "https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment";
+// On GitHub Pages (<owner>.github.io/<repo>/) the source link is derived from the URL, so renaming the
+// repository needs no code change. The fallback is only used when the page is served locally.
+const REPO = location.hostname.endsWith(".github.io")
+  ? `https://github.com/${location.hostname.split(".")[0]}/${location.pathname.split("/")[1]}`
+  : "https://github.com/alexkeranis/Default-Risk-Interactive-Predictor";
 // The Pages workflow loads this module as app.js?v=<commit>; reuse that query on data fetches so the
 // JSON always matches the deployed code. Empty when served locally, which is fine.
 const VERSION = new URL(import.meta.url).search;
@@ -63,16 +67,6 @@ function el(tag, props = {}, children = []) {
   return n;
 }
 
-function luminance(hex) {
-  const m = hex.replace("#", "").match(/.{2}/g);
-  if (!m) return 1;
-  const [r, g, b] = m.map((h) => {
-    const c = parseInt(h, 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
 /** Paint the filled part of a range track (CSS reads --fill). */
 function setFill(input) {
   const min = Number(input.min);
@@ -83,7 +77,7 @@ function setFill(input) {
 
 // ---------------------------------------------------------------- state
 let bundle, dash;
-const state = { input: { ...PRESETS.stretched }, simModel: null, diagModel: null, cm: "confusion_argmax", cost: null };
+const state = { input: { ...PRESETS.stretched }, simModel: null, diagModel: null, cost: null };
 const charts = {};
 // "What changed" tracking: a gesture groups consecutive edits of the same control.
 let last = null; // { pd, approve } of the previous render
@@ -211,7 +205,7 @@ function renderChange(pd, approve) {
       box.replaceChildren(
         el("strong", { text: what }),
         ` · expected PD ${pct(gesture.pd)} → ${pct(pd)} (${arrow})`,
-        flipped ? el("strong", { text: ` · decision flips to ${approve ? "Approve" : "Decline"}!` }) : " · decision unchanged",
+        flipped ? el("strong", { text: ` · decision flips to ${approve ? "Approve" : "Decline"}` }) : " · decision unchanged",
       );
     }
     pendingChange = null;
@@ -456,7 +450,7 @@ function renderStats() {
     el("div", { class: "stat" }, [el("div", { class: "stat-label", text: label }), el("div", { class: "stat-value", text: value }), el("div", { class: "stat-note", text: note })]);
   const d = dash.decisions[sel].test;
   $("stat-strip").replaceChildren(
-    stat("Deployed model", NAMES[sel], `${dash.calibration[sel].chosen} calibration`),
+    stat("Deployed model", NAMES[sel], "simplest within 1 SE of best log loss"),
     stat("Test macro F1", fx(t.calibrated.macro_f1), `95% CI ${fx(t.ci95.macro_f1[0])}–${fx(t.ci95.macro_f1[1])}`),
     stat("High-risk recall", pct(t.calibrated.recall_High, 0), `precision ${pct(t.calibrated.precision_High, 0)}`),
     stat("Approval at trained cutoff", pct(d.approval_rate, 0), `${pct(d.high_rate_approved, 1)} High tier approved`),
@@ -467,7 +461,7 @@ function renderBenchmark() {
   const fams = ["logreg", "xgboost", "resnet"];
   const pm = (m, k, d = 3) => `${fx(m[k].mean, d)} ± ${fx(m[k].std, d)}`;
   const ci = (t, k, d = 3) => `${fx(t.calibrated[k], d)} [${fx(t.ci95[k][0], d)}, ${fx(t.ci95[k][1], d)}]`;
-  const head = ["Model", "CV log loss", "CV Brier", "CV macro F1", "CV PR-AUC High", "Test macro F1 [95% CI]", "Test recall High [95% CI]", "Calibration"];
+  const head = ["Model", "CV log loss", "CV Brier", "CV macro F1", "CV PR-AUC High", "Test macro F1 [95% CI]", "Test recall High [95% CI]"];
   $("bench").replaceChildren(
     el("tr", {}, head.map((h, i) => el("th", { class: i ? "num" : "", text: h }))),
     ...fams.map((f) => {
@@ -485,7 +479,6 @@ function renderBenchmark() {
         el("td", { class: "num", text: pm(c, "pr_auc_High") }),
         el("td", { class: "num", text: ci(t, "macro_f1") }),
         el("td", { class: "num", text: ci(t, "recall_High") }),
-        el("td", { class: "num", text: dash.calibration[f].chosen }),
       ]);
     }),
   );
@@ -494,7 +487,7 @@ function renderBenchmark() {
 
   const a = dash.ablations;
   $("insight").replaceChildren(
-    el("strong", { text: "What the features buy. " }),
+    el("strong", { text: "Effect of feature engineering. " }),
     `Engineered ratios cut cross-validated log loss from ${fx(a["logreg/raw_features"].log_loss.mean)} to ` +
       `${fx(dash.cv.logreg.log_loss.mean)} for logistic regression (XGBoost: ${fx(a["xgboost/raw_features"].log_loss.mean)} → ` +
       `${fx(dash.cv.xgboost.log_loss.mean)}). Employment status and late-payment history are essential: without them a ` +
@@ -509,77 +502,6 @@ function renderBenchmark() {
     (sig.length ? `${sig.length} pairwise difference(s) are significant at 5% (corrected t-test). `
       : "no pairwise difference is significant at 5% (corrected t-test). ") +
     `${NAMES[dash.selected]} is deployed under a pre-registered rule: the simplest model within one standard error of the best log loss.`;
-}
-
-function renderReliability() {
-  const fam = state.diagModel;
-  const rel = dash.reliability_test[fam];
-  const color = css(SLOT[fam]);
-  $("rel-key").style.background = color;
-  $("rel-caption").textContent = `${NAMES[fam]}, ${dash.calibration[fam].chosen} calibration; 10 equal-width bins, marker size ∝ bin count`;
-  TIERS.forEach((tier, k) => {
-    const pts = (stage) => rel[stage][tier].mean_pred.map((x, i) => ({ x, y: rel[stage][tier].frac_pos[i], n: rel[stage][tier].n[i] }));
-    const radius = (stage) => {
-      const ns = rel[stage][tier].n;
-      const max = Math.max(...ns);
-      return ns.map((n) => 3 + 5 * Math.sqrt(n / max));
-    };
-    upsertChart(`rel-${k}`, {
-      type: "scatter",
-      data: {
-        datasets: [
-          { data: [{ x: 0, y: 0 }, { x: 1, y: 1 }], showLine: true, borderColor: css("--axis"), borderWidth: 1, pointRadius: 0, label: "perfect" },
-          { data: pts("uncalibrated"), showLine: true, borderColor: css("--muted"), backgroundColor: css("--muted"), borderWidth: 2,
-            pointRadius: radius("uncalibrated"), pointBorderColor: css("--surface-1"), pointBorderWidth: 2, label: "uncalibrated" },
-          { data: pts("calibrated"), showLine: true, borderColor: color, backgroundColor: color, borderWidth: 2,
-            pointRadius: radius("calibrated"), pointBorderColor: css("--surface-1"), pointBorderWidth: 2, pointHitRadius: 12, label: "calibrated" },
-        ],
-      },
-      options: {
-        scales: {
-          x: axis({ min: 0, max: 1, ticks: { stepSize: 0.2, callback: (v) => Number(v).toFixed(1) } }),
-          y: axis({ min: 0, max: 1, ticks: { stepSize: 0.2, callback: (v) => Number(v).toFixed(1) } }),
-        },
-        plugins: {
-          tooltip: {
-            filter: (c) => c.datasetIndex > 0,
-            callbacks: {
-              title: (items) => items[0].dataset.label,
-              label: (c) => `observed ${pct(c.raw.y)} vs predicted ${pct(c.raw.x)} (n=${c.raw.n})`,
-            },
-          },
-        },
-      },
-    });
-  });
-}
-
-function renderConfusion() {
-  const fam = state.diagModel;
-  const d = dash.decisions[fam].test;
-  const cm = d[state.cm];
-  const steps = ["--seq-0", "--seq-1", "--seq-2", "--seq-3", "--seq-4"].map(css);
-  const rows = cm.map((row) => {
-    const s = row.reduce((a, b) => a + b, 0);
-    return row.map((v) => ({ v, r: s ? v / s : 0 }));
-  });
-  $("cm").replaceChildren(
-    el("tr", {}, [el("th", { class: "row", text: "Actual ↓ / Predicted →" }), ...TIERS.map((t) => el("th", { text: t }))]),
-    ...rows.map((row, i) =>
-      el("tr", {}, [
-        el("th", { class: "row", text: TIERS[i] }),
-        ...row.map(({ v, r }) => {
-          const bg = steps[Math.min(4, Math.floor(r * 4.999))];
-          const ink = luminance(bg) > 0.4 ? "#0b0b0b" : "#ffffff";
-          return el("td", { style: { background: bg, color: ink }, title: `${v} applicants` }, [pct(r, 0), el("small", { text: `${v}` })]);
-        }),
-      ]),
-    ),
-  );
-  const rule = state.cm === "confusion_argmax" ? "argmax tier" : "cost-optimal tier (minimises expected misclassification cost)";
-  $("cm-caption").textContent =
-    `${NAMES[fam]}, ${rule}; row-normalised. Expected misclassification cost per applicant: ` +
-    `argmax ${fx(d.misclassification_cost_argmax)} vs cost-optimal ${fx(d.misclassification_cost_bayes)}.`;
 }
 
 function renderImportance() {
@@ -644,6 +566,12 @@ function renderCutoff() {
   slider.value = cutoffToSlider(c);
   setFill(slider);
   $("cut-value").textContent = pct(c, 2);
+  const [p0, p1, p2] = state.cost.pd_by_tier.map((v) => pct(v, 0));
+  $("cut-explain").textContent =
+    "The cutoff is the highest expected probability of default (PD) the lender accepts. " +
+    `Expected PD = P(Low) × ${p0} + P(Medium) × ${p1} + P(High) × ${p2}, using the tier default rates from the assumptions above. ` +
+    `Applicants at or below the cutoff are approved and the rest are declined. The trained value, ${pct(bundle.pd_cutoff[bundle.selected], 2)}, ` +
+    "maximises the profit proxy on development data.";
   $("c-appr").textContent = pct(p.approval_rate);
   $("c-bad").textContent = pct(p.medhigh_rate_approved, 2);
   $("c-cap").textContent = pct(p.high_captured);
@@ -658,8 +586,6 @@ function renderCutoff() {
 
 // ---------------------------------------------------------------- wiring
 function renderDiagnostics() {
-  renderReliability();
-  renderConfusion();
   renderImportance();
   renderCostCurve();
 }
@@ -703,13 +629,6 @@ async function main() {
       state.input = { ...PRESETS[b.dataset.preset] };
       syncForm();
       renderSimulation();
-    });
-  }
-  for (const b of document.querySelectorAll("[data-cm]")) {
-    b.addEventListener("click", () => {
-      state.cm = b.dataset.cm;
-      document.querySelectorAll("[data-cm]").forEach((x) => x.classList.toggle("on", x === b));
-      renderConfusion();
     });
   }
   $("cut-slider").addEventListener("input", (e) => {

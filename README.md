@@ -1,18 +1,23 @@
-# BNPL Default-Risk Tiers: a leak-free, calibrated, cost-aware benchmark
+# BNPL Default Risk
 
-[![tests](https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment/actions/workflows/tests.yml/badge.svg)](https://github.com/alexkeranis/Buy-Now-Pay-Later---Default-Risk-Assessment/actions/workflows/tests.yml)
+[![tests](https://github.com/alexkeranis/Default-Risk-Interactive-Predictor/actions/workflows/tests.yml/badge.svg)](https://github.com/alexkeranis/Default-Risk-Interactive-Predictor/actions/workflows/tests.yml)
 
-**[Live demo: underwriting simulator and model diagnostics](https://alexkeranis.github.io/Buy-Now-Pay-Later---Default-Risk-Assessment/)**
-
-A Buy Now, Pay Later provider must decide whether to finance a purchase at checkout, in milliseconds.
-This project estimates each applicant's probability of falling into a **Low / Medium / High** default-risk
+A Buy Now, Pay Later provider has to decide at checkout whether to finance a purchase.
+This project estimates each applicant's probability of falling into a Low, Medium or High default-risk
 tier, calibrates those probabilities, and turns them into an approve/decline decision under explicit unit
-economics. Everything runs through one scikit-learn pipeline: training, cross-validation, batch and
-single-record serving, and a zero-backend [browser demo](https://alexkeranis.github.io/Buy-Now-Pay-Later---Default-Risk-Assessment/).
+economics. One scikit-learn pipeline covers training, cross-validation, and batch and single-record scoring.
 
-> **Read this first: the data is synthetic.** The labels follow a near-deterministic rule (a depth-4
-> decision tree reaches 0.84 macro F1). Every number below is a *benchmark on a synthetic generator*, not an
-> estimate of real-world credit performance. See [Dataset and limitations](#dataset-and-limitations).
+This repository has its own interactive web page, built by GitHub Actions and hosted on GitHub Pages:
+[alexkeranis.github.io/Default-Risk-Interactive-Predictor](https://alexkeranis.github.io/Default-Risk-Interactive-Predictor/)
+
+[![Underwriting simulator: doubling the applicant's income flips the decision from Decline to Approve](docs/assets/simulator.png)](https://alexkeranis.github.io/Default-Risk-Interactive-Predictor/)
+
+The model runs in the browser. In the capture above, doubling a student's income from $14,000 to $28,000
+drops the expected probability of default from 14.3% to 2.4% and the decision flips to Approve.
+
+> **The data is synthetic.** The labels follow a near-deterministic rule (a depth-4 decision tree reaches
+> 0.84 macro F1), so the numbers below are a benchmark on a synthetic generator and say little about
+> real-world credit performance. See [Dataset and limitations](#dataset-and-limitations).
 
 ## Results
 
@@ -26,7 +31,7 @@ tuning budget, tuned by inner CV on log loss.
 | XGBoost | 0.071 ± 0.007 | 0.042 ± 0.005 | 0.894 ± 0.020 | 0.977 ± 0.009 | 0.884 [0.855, 0.910] | 0.837 [0.760, 0.904] | 0.005 |
 | Tabular ResNet (PyTorch) | 0.076 ± 0.009 | 0.045 ± 0.006 | 0.891 ± 0.016 | 0.979 ± 0.010 | 0.888 [0.861, 0.914] | 0.875 [0.808, 0.942] | 0.005 |
 
-- **The three families are statistically tied on macro F1.** No pairwise difference is significant
+- The three families are statistically tied on macro F1. No pairwise difference is significant
   (Nadeau–Bengio corrected t-test, p ≥ 0.19).
 - On log loss, logistic regression and XGBoost both beat the ResNet (p = 0.003 and p = 0.035) and are tied
   with each other (p = 0.36).
@@ -93,18 +98,25 @@ with employment status and late-payment history added.
 
 ### Calibration
 
-Calibration (sigmoid, isotonic or temperature) is chosen per family by out-of-fold Brier score.
-- **Tuned models are already well calibrated.** Tuning on log loss selected *no* class weights for every
-  family, and temperature scaling (fitted β 0.94 for logistic regression, 1.06 for XGBoost) changes little. Test ECE for the High tier is 0.003.
-- **Class-weighted training needs repair.** Inverse-frequency class weights make the implied priors
-  uniform. The [benchmark](reports/benchmark.md#class-weighted-training-and-probability-repair)
-  shows that a temperature cannot undo this, and that one-vs-rest sigmoid/isotonic on a multinomial model
-  make it worse. Only the analytic Bayes prior correction (p ∝ p_w · π / π_w) restores calibrated
-  probabilities:
-  - out-of-fold Brier 0.070 → **0.042**
-  - mean P(Medium) 0.105 → **0.068**, the observed base rate
-  - Medium ECE 0.037 → **0.003**
-- **Takeaway:** train with a proper scoring rule and put class asymmetry in the decision layer, not the loss.
+The calibration method (none, sigmoid, isotonic or temperature) is chosen per family by out-of-fold Brier score.
+
+The tuned models are already well calibrated. Tuning on log loss selected no class weights for any family,
+and the chosen temperature scaling is close to the identity (fitted β 0.94 for logistic regression, 1.06 for
+XGBoost). It changes test log loss and Brier score by less than 0.001 in either direction, which is far
+inside the bootstrap intervals, and it cannot change the predicted tier, so F1 and recall are identical with
+and without it. Test ECE for the High tier is 0.003.
+
+Class-weighted training is different. Inverse-frequency class weights make the implied priors uniform. The
+[benchmark](reports/benchmark.md#class-weighted-training-and-probability-repair) shows that a temperature
+cannot undo this and that one-vs-rest sigmoid/isotonic on a multinomial model makes it worse. Only the
+analytic Bayes prior correction (p ∝ p_w · π / π_w) restores calibrated probabilities:
+
+- out-of-fold Brier 0.070 → **0.042**
+- mean P(Medium) 0.105 → **0.068**, the observed base rate
+- Medium ECE 0.037 → **0.003**
+
+In short, training with a proper scoring rule and handling class asymmetry in the decision layer works
+better than reweighting the loss.
 
 ![Reliability on the test set](reports/figures/reliability.png)
 
@@ -116,7 +128,7 @@ rows fall between 0.3 and 0.7 (marker area ∝ bin count). Read the zig-zags the
 ### Cost-sensitive decisions
 
 The labels are risk tiers, not observed defaults. Converting them to money requires explicit assumptions,
-set in `config.CostAssumptions` and editable in the demo:
+set in `config.CostAssumptions` and editable on the web page:
 
 - Assumed PD by tier: Low 2%, Medium 15%, High 45%.
 - LGD 85%, merchant fee 4% of the purchase, exposure = purchase value.
@@ -137,17 +149,17 @@ compared with argmax.
 
 ![Cutoff trade-off](reports/figures/cost_curve.png)
 
-### Why accuracy and macro F1 are not enough in underwriting
+### Choice of metrics
 
-- **Errors are asymmetric.** Approving a High-risk applicant loses a multiple of what declining a Low-risk
-  one forgoes. Macro F1 at argmax weights both errors the same, so decisions need a cost model.
-- **Pricing, limits and provisioning consume probabilities.** A classifier with good F1 can still produce
-  badly miscalibrated PDs, as class-weighted training does. Proper scoring rules (log loss, Brier)
-  and reliability curves measure what matters.
-- **Rare-class performance hides inside averages.** With 5% High, accuracy is 88% for a model that
-  approves everyone. Per-class precision/recall and PR-AUC on the High tier are reported for this reason.
-- **Point estimates on 2,000 rows are noisy.** A test macro F1 CI about ±0.025 wide means single-split
-  differences of a few points are not evidence. Repeated CV with a corrected t-test is.
+- Errors are asymmetric. Approving a High-risk applicant loses several times what declining a Low-risk one
+  gives up, while macro F1 at argmax weights both errors equally. Decisions therefore use a cost model.
+- Pricing, limits and provisioning use the probabilities themselves. A classifier with good F1 can still
+  produce badly miscalibrated PDs, as class-weighted training does, so log loss, Brier score and
+  reliability curves are reported alongside F1.
+- With 5% High, a model that approves everyone is 88% accurate. Per-class precision, recall and PR-AUC
+  on the High tier are reported for this reason.
+- A test macro F1 interval about ±0.025 wide means single-split differences of a few points are noise.
+  Model comparisons rely on repeated CV with a corrected t-test.
 
 ## Dataset and limitations
 
@@ -175,7 +187,7 @@ pip install -r requirements-dev.txt && pip install -e . --no-deps
 
 python -m bnpl_risk.train        # tune, CV, calibrate, test once, write models/ + reports/  (~6 min, 16 cores)
 python -m bnpl_risk.reporting    # reports/benchmark.md + reports/figures/*.png
-python -m bnpl_risk.export_web   # docs/data/*.json for the browser demo
+python -m bnpl_risk.export_web   # docs/data/*.json for the web page
 ```
 
 Everything is seeded (`bnpl_risk.seed.seed_everything`: Python, NumPy, torch deterministic algorithms, CPU),
@@ -225,24 +237,23 @@ node --test docs/tests/parity.test.mjs     # browser model == Python pipeline
 
 [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs lint, pytest (CPU torch) and the Node
 parity test on every push and pull request. [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
-rebuilds the demo site from a clean checkout on every push to `main` (or a manual run) and deploys it to GitHub
+rebuilds the web page from a clean checkout on every push to `main` (or a manual run) and deploys it to GitHub
 Pages. Each asset URL is stamped with the commit hash, so a deploy never serves stale JS, CSS or data.
 
-## Interactive demo
+## Web page
 
-[`docs/`](docs/) is a static site with no server: HTML/CSS, Chart.js and a 200-line JS scoring module. It loads
-JSON exported from the fitted pipelines.
+[`docs/`](docs/) is a static site with no server: HTML/CSS, Chart.js and a 200-line JS scoring module that
+reads JSON exported from the fitted pipelines. It is published at
+[alexkeranis.github.io/Default-Risk-Interactive-Predictor](https://alexkeranis.github.io/Default-Risk-Interactive-Predictor/).
 
-- **Underwriting simulator.** Sliders are bounded to the training support. The page shows live tier
-  probabilities, expected PD and loss, the approve/decline decision, and signed per-applicant risk drivers.
-  You can switch between logistic regression and XGBoost and edit the cost assumptions.
-- **Diagnostics.** Benchmark table, reliability curves before and after calibration, confusion matrices
-  (argmax vs cost-optimal), global drivers, and a cutoff slider that recomputes approval rate, bad rate and
-  profit on the test set.
+- Underwriting simulator: sliders bounded to the training support, live tier probabilities, expected PD
+  and loss, the approve/decline decision and signed per-applicant risk drivers. You can switch between
+  logistic regression and XGBoost and edit the cost assumptions.
+- Diagnostics: the benchmark table, global drivers, and a cutoff slider that recomputes approval rate,
+  bad rate and profit on the test set.
 
-**Live at https://alexkeranis.github.io/Buy-Now-Pay-Later---Default-Risk-Assessment/**. To run it locally,
-use `python -m http.server -d docs` and open http://localhost:8000. Browsers block `fetch` from `file://`,
-so opening the HTML file directly won't load the data.
+To run it locally, use `python -m http.server -d docs` and open http://localhost:8000. Browsers block
+`fetch` from `file://`, so opening the HTML file directly won't load the data.
 
 ## Project layout
 
@@ -262,7 +273,7 @@ src/bnpl_risk/
   reporting.py      benchmark.md + figures
   export_web.py     JSON export + Python reference evaluator for the browser model
 tests/              pytest suite
-docs/               static demo (GitHub Pages)
+docs/               static web page (GitHub Pages)
 notebooks/          01_eda (dev split only), 02_benchmark_report (reads artifacts, trains nothing)
 reports/            benchmark.md, figures, CV/tuning logs, split indices
 models/             model_meta.json (committed); *.joblib regenerated by training
